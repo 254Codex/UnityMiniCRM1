@@ -1,48 +1,28 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import { crmService } from '../services/api'
+import { useRouter } from 'vue-router'
+import api from '@/services/api'
+import CompanyForm from '@/components/CompanyForm.vue'
 
+const router = useRouter()
 const companies = ref([])
 const loading = ref(true)
 const dialog = ref(false)
 const viewMode = ref('card') // 'card' or 'table'
 const search = ref('')
-const editedIndex = ref(-1)
-const editedItem = ref({
-  name: '',
-  industry: '',
-  website: '',
-  phone: '',
-  email: '',
-  address: ''
-})
-
-const defaultItem = {
-  name: '',
-  industry: '',
-  website: '',
-  phone: '',
-  email: '',
-  address: ''
-}
+const selectedCompanyId = ref(null)
+const formMode = ref('create') // 'create' or 'edit'
 
 const headers = [
   { title: 'Company', key: 'name', sortable: true },
-  { title: 'Industry', key: 'industry', sortable: true },
+  { title: 'Industry', key: 'industry_display', sortable: true },
+  { title: 'Size', key: 'company_size_display', sortable: true },
   { title: 'Email', key: 'email', sortable: false },
   { title: 'Phone', key: 'phone', sortable: false },
+  { title: 'Contacts', key: 'contact_count', sortable: true, align: 'center' },
+  { title: 'Deals', key: 'deal_count', sortable: true, align: 'center' },
   { title: 'Actions', key: 'actions', sortable: false, align: 'end' }
 ]
-
-const filteredCompanies = computed(() => {
-  if (!search.value) return companies.value
-  const searchLower = search.value.toLowerCase()
-  return companies.value.filter(company =>
-    company.name?.toLowerCase().includes(searchLower) ||
-    company.industry?.toLowerCase().includes(searchLower) ||
-    company.email?.toLowerCase().includes(searchLower)
-  )
-})
 
 onMounted(async () => {
   await loadCompanies()
@@ -51,7 +31,14 @@ onMounted(async () => {
 const loadCompanies = async () => {
   loading.value = true
   try {
-    companies.value = await crmService.getCompanies()
+    const response = await api.companies.getAll()
+    companies.value = response.data.map(company => ({
+      ...company,
+      industry_display: company.industry_display || company.industry,
+      company_size_display: company.company_size_display || company.company_size,
+      contact_count: company.contact_count || 0,
+      deal_count: company.deal_count || 0
+    }))
   } catch (error) {
     console.error('Failed to load companies:', error)
   } finally {
@@ -59,42 +46,43 @@ const loadCompanies = async () => {
   }
 }
 
-const editItem = (item) => {
-  editedIndex.value = companies.value.indexOf(item)
-  editedItem.value = Object.assign({}, item)
+const filteredCompanies = computed(() => {
+  if (!search.value) return companies.value
+  const searchLower = search.value.toLowerCase()
+  return companies.value.filter(company =>
+    company.name?.toLowerCase().includes(searchLower) ||
+    company.industry?.toLowerCase().includes(searchLower) ||
+    company.industry_display?.toLowerCase().includes(searchLower) ||
+    company.email?.toLowerCase().includes(searchLower) ||
+    company.city?.toLowerCase().includes(searchLower)
+  )
+})
+
+const openCreateDialog = () => {
+  selectedCompanyId.value = null
+  formMode.value = 'create'
   dialog.value = true
 }
 
-const deleteItem = async (item) => {
-  if (confirm('Are you sure you want to delete this company?')) {
+const editCompany = (company) => {
+  selectedCompanyId.value = company.id
+  formMode.value = 'edit'
+  dialog.value = true
+}
+
+const viewCompany = (company) => {
+  router.push(`/companies/${company.id}`)
+}
+
+const deleteCompany = async (company) => {
+  if (confirm(`Are you sure you want to delete ${company.name}?`)) {
     try {
-      await crmService.deleteCompany(item.id)
+      await api.companies.delete(company.id)
       await loadCompanies()
     } catch (error) {
       console.error('Failed to delete company:', error)
+      alert('Failed to delete company. It may have associated contacts or deals.')
     }
-  }
-}
-
-const close = () => {
-  dialog.value = false
-  setTimeout(() => {
-    editedItem.value = Object.assign({}, defaultItem)
-    editedIndex.value = -1
-  }, 300)
-}
-
-const save = async () => {
-  try {
-    if (editedIndex.value > -1) {
-      await crmService.updateCompany(editedItem.value.id, editedItem.value)
-    } else {
-      await crmService.createCompany(editedItem.value)
-    }
-    await loadCompanies()
-    close()
-  } catch (error) {
-    console.error('Failed to save company:', error)
   }
 }
 
@@ -110,6 +98,25 @@ const getCompanyInitials = (name) => {
 const getCompanyColor = (index) => {
   const colors = ['primary', 'secondary', 'success', 'info', 'warning', 'purple', 'pink', 'indigo']
   return colors[index % colors.length]
+}
+
+const handleFormSaved = async () => {
+  dialog.value = false
+  await loadCompanies()
+}
+
+const handleFormCanceled = () => {
+  dialog.value = false
+}
+
+const formatCurrency = (value) => {
+  if (!value) return '-'
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
+  }).format(value)
 }
 </script>
 
@@ -127,7 +134,7 @@ const getCompanyColor = (index) => {
             color="primary"
             size="large"
             prepend-icon="mdi-plus"
-            @click="dialog = true"
+            @click="openCreateDialog"
             elevation="2"
           >
             Add Company
@@ -192,7 +199,7 @@ const getCompanyColor = (index) => {
         md="4"
         lg="3"
       >
-        <v-card elevation="3" class="company-card h-100" hover>
+        <v-card elevation="3" class="company-card h-100" hover @click="viewCompany(company)" style="cursor: pointer;">
           <v-card-text class="pa-4">
             <div class="d-flex align-center mb-3">
               <v-avatar
@@ -206,13 +213,29 @@ const getCompanyColor = (index) => {
               </v-avatar>
               <div class="flex-grow-1">
                 <h3 class="text-h6 font-weight-bold text-truncate">{{ company.name }}</h3>
-                <p class="text-caption text-grey text-truncate">{{ company.industry || 'No industry' }}</p>
+                <v-chip v-if="company.industry_display" size="x-small" variant="tonal" class="mt-1">
+                  {{ company.industry_display }}
+                </v-chip>
+                <p v-else class="text-caption text-grey mt-1">No industry</p>
               </div>
             </div>
 
             <v-divider class="my-3"></v-divider>
 
             <div class="company-details">
+              <div class="d-flex align-center justify-space-between mb-2">
+                <span class="text-caption text-grey">Contacts:</span>
+                <span class="text-caption font-weight-medium">{{ company.contact_count || 0 }}</span>
+              </div>
+              <div class="d-flex align-center justify-space-between mb-2">
+                <span class="text-caption text-grey">Active Deals:</span>
+                <span class="text-caption font-weight-medium">{{ company.deal_count || 0 }}</span>
+              </div>
+              
+              <div class="d-flex align-center mb-2" v-if="company.annual_revenue">
+                <v-icon size="small" class="mr-2" color="grey-darken-1">mdi-currency-usd</v-icon>
+                <span class="text-caption text-truncate">{{ formatCurrency(company.annual_revenue) }}</span>
+              </div>
               <div class="d-flex align-center mb-2" v-if="company.email">
                 <v-icon size="small" class="mr-2" color="grey-darken-1">mdi-email</v-icon>
                 <span class="text-caption text-truncate">{{ company.email }}</span>
@@ -223,20 +246,27 @@ const getCompanyColor = (index) => {
               </div>
               <div class="d-flex align-center" v-if="company.website">
                 <v-icon size="small" class="mr-2" color="grey-darken-1">mdi-web</v-icon>
-                <a :href="company.website" target="_blank" class="text-caption text-primary text-truncate">
+                <a :href="company.website" target="_blank" class="text-caption text-primary text-truncate" @click.stop>
                   {{ company.website }}
                 </a>
+              </div>
+              
+              <div class="d-flex align-center mt-2" v-if="company.city || company.country">
+                <v-icon size="small" class="mr-2" color="grey-darken-1">mdi-map-marker</v-icon>
+                <span class="text-caption text-truncate">
+                  {{ [company.city, company.country].filter(Boolean).join(', ') }}
+                </span>
               </div>
             </div>
           </v-card-text>
 
-          <v-card-actions class="pa-3 pt-0">
+          <v-card-actions class="pa-3 pt-0" @click.stop>
             <v-btn
               size="small"
               variant="text"
               color="primary"
               prepend-icon="mdi-pencil"
-              @click="editItem(company)"
+              @click="editCompany(company)"
             >
               Edit
             </v-btn>
@@ -246,7 +276,7 @@ const getCompanyColor = (index) => {
               variant="text"
               color="error"
               icon="mdi-delete"
-              @click="deleteItem(company)"
+              @click="deleteCompany(company)"
             ></v-btn>
           </v-card-actions>
         </v-card>
@@ -260,7 +290,7 @@ const getCompanyColor = (index) => {
             <p class="text-body-2 text-grey mb-4">
               {{ search ? 'Try adjusting your search' : 'Get started by adding your first company' }}
             </p>
-            <v-btn v-if="!search" color="primary" @click="dialog = true" prepend-icon="mdi-plus">
+            <v-btn v-if="!search" color="primary" @click="openCreateDialog" prepend-icon="mdi-plus">
               Add Company
             </v-btn>
           </div>
@@ -276,7 +306,7 @@ const getCompanyColor = (index) => {
             :headers="headers"
             :items="filteredCompanies"
             :loading="loading"
-            items-per-page="15"
+            :items-per-page="15"
           >
             <template v-slot:item.name="{ item, index }">
               <div class="d-flex align-center py-2">
@@ -285,13 +315,22 @@ const getCompanyColor = (index) => {
                     {{ getCompanyInitials(item.name) }}
                   </span>
                 </v-avatar>
-                <span class="font-weight-medium">{{ item.name }}</span>
+                <div>
+                  <span class="font-weight-medium d-block">{{ item.name }}</span>
+                  <span v-if="item.city || item.country" class="text-caption text-grey">
+                    {{ [item.city, item.country].filter(Boolean).join(', ') }}
+                  </span>
+                </div>
               </div>
             </template>
-            <template v-slot:item.industry="{ item }">
-              <v-chip v-if="item.industry" size="small" variant="tonal">
-                {{ item.industry }}
+            <template v-slot:item.industry_display="{ item }">
+              <v-chip v-if="item.industry_display" size="small" variant="tonal">
+                {{ item.industry_display }}
               </v-chip>
+              <span v-else class="text-grey">-</span>
+            </template>
+            <template v-slot:item.company_size_display="{ item }">
+              <span v-if="item.company_size_display">{{ item.company_size_display }}</span>
               <span v-else class="text-grey">-</span>
             </template>
             <template v-slot:item.email="{ item }">
@@ -302,102 +341,51 @@ const getCompanyColor = (index) => {
               <span v-if="item.phone">{{ item.phone }}</span>
               <span v-else class="text-grey">-</span>
             </template>
+            <template v-slot:item.contact_count="{ item }">
+              <v-chip v-if="item.contact_count > 0" size="small" color="primary" variant="flat">
+                {{ item.contact_count }}
+              </v-chip>
+              <span v-else class="text-grey">0</span>
+            </template>
+            <template v-slot:item.deal_count="{ item }">
+              <v-chip v-if="item.deal_count > 0" size="small" color="success" variant="flat">
+                {{ item.deal_count }}
+              </v-chip>
+              <span v-else class="text-grey">0</span>
+            </template>
             <template v-slot:item.actions="{ item }">
-              <v-icon size="small" class="mr-2" @click="editItem(item)" color="primary">mdi-pencil</v-icon>
-              <v-icon size="small" @click="deleteItem(item)" color="error">mdi-delete</v-icon>
+              <div class="d-flex">
+                <v-tooltip text="View Details">
+                  <template v-slot:activator="{ props }">
+                    <v-icon size="small" v-bind="props" @click="viewCompany(item)" color="info" class="mr-2">mdi-eye</v-icon>
+                  </template>
+                </v-tooltip>
+                <v-tooltip text="Edit">
+                  <template v-slot:activator="{ props }">
+                    <v-icon size="small" v-bind="props" @click="editCompany(item)" color="primary" class="mr-2">mdi-pencil</v-icon>
+                  </template>
+                </v-tooltip>
+                <v-tooltip text="Delete">
+                  <template v-slot:activator="{ props }">
+                    <v-icon size="small" v-bind="props" @click="deleteCompany(item)" color="error">mdi-delete</v-icon>
+                  </template>
+                </v-tooltip>
+              </div>
             </template>
           </v-data-table>
         </v-card>
       </v-col>
     </v-row>
 
-    <!-- Add/Edit Dialog -->
-    <v-dialog v-model="dialog" max-width="700px" persistent>
-      <v-card>
-        <v-card-title class="pa-4 bg-grey-lighten-4">
-          <div class="d-flex align-center">
-            <v-icon class="mr-2" color="primary">
-              {{ editedIndex === -1 ? 'mdi-office-building-plus' : 'mdi-office-building-edit' }}
-            </v-icon>
-            <span class="text-h6 font-weight-bold">
-              {{ editedIndex === -1 ? 'New Company' : 'Edit Company' }}
-            </span>
-          </div>
-        </v-card-title>
-        <v-divider></v-divider>
-        <v-card-text class="pa-6">
-          <v-container>
-            <v-row>
-              <v-col cols="12">
-                <v-text-field
-                  v-model="editedItem.name"
-                  label="Company Name *"
-                  variant="outlined"
-                  color="primary"
-                  prepend-inner-icon="mdi-office-building"
-                  required
-                ></v-text-field>
-              </v-col>
-              <v-col cols="12" sm="6">
-                <v-text-field
-                  v-model="editedItem.industry"
-                  label="Industry"
-                  variant="outlined"
-                  color="primary"
-                  prepend-inner-icon="mdi-domain"
-                ></v-text-field>
-              </v-col>
-              <v-col cols="12" sm="6">
-                <v-text-field
-                  v-model="editedItem.email"
-                  label="Email"
-                  type="email"
-                  variant="outlined"
-                  color="primary"
-                  prepend-inner-icon="mdi-email"
-                ></v-text-field>
-              </v-col>
-              <v-col cols="12" sm="6">
-                <v-text-field
-                  v-model="editedItem.phone"
-                  label="Phone"
-                  variant="outlined"
-                  color="primary"
-                  prepend-inner-icon="mdi-phone"
-                ></v-text-field>
-              </v-col>
-              <v-col cols="12" sm="6">
-                <v-text-field
-                  v-model="editedItem.website"
-                  label="Website"
-                  variant="outlined"
-                  color="primary"
-                  prepend-inner-icon="mdi-web"
-                  placeholder="https://example.com"
-                ></v-text-field>
-              </v-col>
-              <v-col cols="12">
-                <v-textarea
-                  v-model="editedItem.address"
-                  label="Address"
-                  variant="outlined"
-                  color="primary"
-                  prepend-inner-icon="mdi-map-marker"
-                  rows="3"
-                ></v-textarea>
-              </v-col>
-            </v-row>
-          </v-container>
-        </v-card-text>
-        <v-divider></v-divider>
-        <v-card-actions class="pa-4">
-          <v-spacer></v-spacer>
-          <v-btn color="grey" variant="text" @click="close" size="large">Cancel</v-btn>
-          <v-btn color="primary" variant="flat" @click="save" size="large" prepend-icon="mdi-content-save">
-            Save Company
-          </v-btn>
-        </v-card-actions>
-      </v-card>
+    <!-- Company Form Dialog -->
+    <v-dialog v-model="dialog" max-width="900px" persistent>
+      <company-form
+        v-if="dialog"
+        :company-id="selectedCompanyId"
+        :mode="formMode"
+        @saved="handleFormSaved"
+        @canceled="handleFormCanceled"
+      />
     </v-dialog>
   </v-container>
 </template>

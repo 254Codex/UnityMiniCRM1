@@ -1,15 +1,20 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import api from './services/api'  // ✅ CORRECT: Default import
+import api from '@/services/api'
 
 const router = useRouter()
 const route = useRoute()
 const drawer = ref(true)
-const user = ref(null)
 const rail = ref(false)
+const user = ref(null)
+const darkMode = ref(false)
+const searchQuery = ref('')
+const notifications = ref([])
 
 const isAuthenticated = computed(() => !!localStorage.getItem('token'))
+
+const unreadCount = computed(() => notifications.value.filter(n => !n.read).length)
 
 // Updated to exclude auth pages
 const showLayout = computed(() => {
@@ -19,16 +24,22 @@ const showLayout = computed(() => {
 
 onMounted(() => {
   loadUserData()
+  loadNotifications()
+  setupKeyboardShortcuts()
+  loadThemePreference()
 })
 
-// Load user data from storage and API
+onUnmounted(() => {
+  cleanupKeyboardShortcuts()
+})
+
+// Load user data
 const loadUserData = async () => {
   const userStr = localStorage.getItem('user')
   if (userStr) {
     user.value = JSON.parse(userStr)
   }
   
-  // If authenticated but no user data, fetch from API
   if (isAuthenticated.value && (!user.value || !user.value.username)) {
     try {
       const response = await api.users.getProfile()
@@ -40,6 +51,93 @@ const loadUserData = async () => {
   }
 }
 
+// Load notifications
+const loadNotifications = async () => {
+  try {
+    // This endpoint may need to be created
+    const response = await api.tasks.getMyTasks()
+    // Use tasks as notifications for now
+    notifications.value = response.data.map(task => ({
+      id: task.id,
+      title: `Task due: ${task.title}`,
+      message: task.description || 'No description',
+      timestamp: task.due_date,
+      read: task.status === 'completed',
+      type: 'task'
+    }))
+  } catch (error) {
+    console.error('Failed to load notifications:', error)
+  }
+}
+
+// Theme handling
+const loadThemePreference = () => {
+  const savedTheme = localStorage.getItem('darkMode')
+  if (savedTheme) {
+    darkMode.value = savedTheme === 'true'
+    applyTheme(darkMode.value)
+  }
+}
+
+const applyTheme = (isDark) => {
+  document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light')
+}
+
+const toggleDarkMode = () => {
+  darkMode.value = !darkMode.value
+  localStorage.setItem('darkMode', darkMode.value)
+  applyTheme(darkMode.value)
+}
+
+// Keyboard shortcuts
+const handleKeyPress = (event) => {
+  // Global search (Cmd/Ctrl + K)
+  if ((event.ctrlKey || event.metaKey) && event.key === 'k') {
+    event.preventDefault()
+    const searchInput = document.querySelector('.search-field input')
+    if (searchInput) searchInput.focus()
+    return
+  }
+  
+  // Navigation shortcuts (only when authenticated)
+  if (isAuthenticated.value && (event.ctrlKey || event.metaKey)) {
+    switch(event.key) {
+      case 'd':
+        event.preventDefault()
+        router.push('/')
+        break
+      case 'c':
+        event.preventDefault()
+        router.push('/contacts')
+        break
+      case 'o':
+        event.preventDefault()
+        router.push('/companies')
+        break
+      case 's':
+        event.preventDefault()
+        router.push('/deals')
+        break
+      case 't':
+        event.preventDefault()
+        router.push('/tasks')
+        break
+      case 'p':
+        event.preventDefault()
+        router.push('/profile')
+        break
+    }
+  }
+}
+
+const setupKeyboardShortcuts = () => {
+  window.addEventListener('keydown', handleKeyPress)
+}
+
+const cleanupKeyboardShortcuts = () => {
+  window.removeEventListener('keydown', handleKeyPress)
+}
+
 const menuItems = [
   { 
     title: 'Dashboard', 
@@ -47,7 +145,8 @@ const menuItems = [
     route: '/',
     description: 'Overview & insights',
     color: '#1976D2',
-    gradient: 'linear-gradient(135deg, #1565C0 0%, #0D47A1 100%)'
+    gradient: 'linear-gradient(135deg, #1565C0 0%, #0D47A1 100%)',
+    shortcut: 'Ctrl+D'
   },
   { 
     title: 'Contacts', 
@@ -55,7 +154,8 @@ const menuItems = [
     route: '/contacts',
     description: 'Manage contacts',
     color: '#0288D1',
-    gradient: 'linear-gradient(135deg, #0288D1 0%, #01579B 100%)'
+    gradient: 'linear-gradient(135deg, #0288D1 0%, #01579B 100%)',
+    shortcut: 'Ctrl+C'
   },
   { 
     title: 'Companies', 
@@ -63,7 +163,8 @@ const menuItems = [
     route: '/companies',
     description: 'Business partners',
     color: '#1976D2',
-    gradient: 'linear-gradient(135deg, #1976D2 0%, #0D47A1 100%)'
+    gradient: 'linear-gradient(135deg, #1976D2 0%, #0D47A1 100%)',
+    shortcut: 'Ctrl+O'
   },
   { 
     title: 'Deals', 
@@ -71,7 +172,8 @@ const menuItems = [
     route: '/deals',
     description: 'Sales pipeline',
     color: '#0277BD',
-    gradient: 'linear-gradient(135deg, #0277BD 0%, #01579B 100%)'
+    gradient: 'linear-gradient(135deg, #0277BD 0%, #01579B 100%)',
+    shortcut: 'Ctrl+S'
   },
   { 
     title: 'Tasks', 
@@ -79,7 +181,8 @@ const menuItems = [
     route: '/tasks',
     description: 'Todo & reminders',
     color: '#0288D1',
-    gradient: 'linear-gradient(135deg, #039BE5 0%, #01579B 100%)'
+    gradient: 'linear-gradient(135deg, #039BE5 0%, #01579B 100%)',
+    shortcut: 'Ctrl+T'
   },
   { 
     title: 'Profile', 
@@ -87,17 +190,16 @@ const menuItems = [
     route: '/profile',
     description: 'Manage your profile',
     color: '#7B1FA2',
-    gradient: 'linear-gradient(135deg, #7B1FA2 0%, #4A148C 100%)'
+    gradient: 'linear-gradient(135deg, #7B1FA2 0%, #4A148C 100%)',
+    shortcut: 'Ctrl+P'
   },
 ]
 
 const handleLogout = async () => {
   try {
-    // ✅ CORRECT: Using the api object structure
     await api.auth.logout()
   } catch (error) {
     console.error('Logout error:', error)
-    // Still logout locally even if API call fails
   } finally {
     localStorage.removeItem('token')
     localStorage.removeItem('user')
@@ -106,16 +208,13 @@ const handleLogout = async () => {
   }
 }
 
-// Enhanced user display
 const userDisplay = computed(() => {
   if (!user.value) return 'User'
   
-  // Check for enhanced user profile structure
   if (user.value.user && user.value.user.first_name && user.value.user.last_name) {
     return `${user.value.user.first_name} ${user.value.user.last_name}`
   }
   
-  // Check for basic user structure
   if (user.value.first_name && user.value.last_name) {
     return `${user.value.first_name} ${user.value.last_name}`
   }
@@ -129,7 +228,6 @@ const getUserInitials = () => {
   let firstName = ''
   let lastName = ''
   
-  // Handle nested user structure from profile API
   if (user.value.user) {
     firstName = user.value.user.first_name || ''
     lastName = user.value.user.last_name || ''
@@ -149,7 +247,12 @@ const getItemGradient = (item) => {
   return route.path === item.route ? item.gradient : 'transparent'
 }
 
-// Quick add functions
+const handleSearch = (query) => {
+  if (query.trim()) {
+    router.push(`/search?q=${encodeURIComponent(query.trim())}`)
+  }
+}
+
 const quickAdd = {
   contact: () => router.push('/contacts/create'),
   company: () => router.push('/companies/create'),
@@ -157,14 +260,18 @@ const quickAdd = {
   task: () => router.push('/tasks/create'),
 }
 
-// Navigation functions
 const navigateTo = (path) => {
   router.push(path)
+}
+
+// Mark all notifications as read
+const markAllAsRead = () => {
+  notifications.value.forEach(n => n.read = true)
 }
 </script>
 
 <template>
-  <v-app>
+  <v-app :theme="darkMode ? 'dark' : 'light'">
     <template v-if="showLayout && isAuthenticated">
       <!-- Premium App Bar -->
       <v-app-bar 
@@ -201,6 +308,8 @@ const navigateTo = (path) => {
           <!-- Search Bar -->
           <div class="search-wrapper mx-4 d-none d-sm-block">
             <v-text-field
+              v-model="searchQuery"
+              @keyup.enter="handleSearch(searchQuery)"
               prepend-inner-icon="mdi-magnify"
               placeholder="Search contacts, deals, companies..."
               variant="solo"
@@ -209,7 +318,6 @@ const navigateTo = (path) => {
               flat
               class="search-field"
               bg-color="grey-lighten-4"
-              @keyup.enter="navigateTo('/search?q=' + $event.target.value)"
             >
               <template v-slot:append-inner>
                 <v-chip size="x-small" class="search-shortcut">⌘K</v-chip>
@@ -221,6 +329,18 @@ const navigateTo = (path) => {
           
           <!-- Actions -->
           <div class="d-flex align-center gap-2">
+            <!-- Dark Mode Toggle -->
+            <v-btn 
+              icon 
+              class="action-btn"
+              variant="text"
+              @click="toggleDarkMode"
+              :title="darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'"
+            >
+              <v-icon v-if="darkMode">mdi-weather-sunny</v-icon>
+              <v-icon v-else>mdi-weather-night</v-icon>
+            </v-btn>
+            
             <!-- Quick Add -->
             <v-menu offset-y>
               <template v-slot:activator="{ props }">
@@ -260,11 +380,73 @@ const navigateTo = (path) => {
             </v-menu>
             
             <!-- Notifications -->
-            <v-btn icon class="action-btn" variant="text" @click="navigateTo('/notifications')">
-              <v-badge color="error" content="3" dot offset-x="12" offset-y="12">
-                <v-icon>mdi-bell</v-icon>
-              </v-badge>
-            </v-btn>
+            <v-menu offset-y min-width="350">
+              <template v-slot:activator="{ props }">
+                <v-btn icon class="action-btn" variant="text" v-bind="props">
+                  <v-badge 
+                    :content="unreadCount" 
+                    :color="unreadCount > 0 ? 'error' : 'transparent'" 
+                    offset-x="12" 
+                    offset-y="12"
+                  >
+                    <v-icon>mdi-bell</v-icon>
+                  </v-badge>
+                </v-btn>
+              </template>
+              <v-card class="notifications-card">
+                <v-card-title class="d-flex justify-space-between align-center pa-4">
+                  <span class="text-h6 font-weight-bold">Notifications</span>
+                  <v-btn 
+                    v-if="unreadCount > 0" 
+                    size="small" 
+                    variant="text" 
+                    @click="markAllAsRead"
+                  >
+                    Mark all as read
+                  </v-btn>
+                </v-card-title>
+                <v-divider></v-divider>
+                <v-list density="compact" class="pa-0">
+                  <v-list-item 
+                    v-for="notification in notifications.slice(0, 5)" 
+                    :key="notification.id"
+                    :class="{ 'bg-grey-lighten-4': !notification.read }"
+                    @click="navigateTo('/tasks')"
+                  >
+                    <template v-slot:prepend>
+                      <v-icon :color="notification.type === 'task' ? 'primary' : 'warning'">
+                        {{ notification.type === 'task' ? 'mdi-check-circle' : 'mdi-alert' }}
+                      </v-icon>
+                    </template>
+                    <v-list-item-title>{{ notification.title }}</v-list-item-title>
+                    <v-list-item-subtitle class="text-truncate">
+                      {{ notification.message }}
+                    </v-list-item-subtitle>
+                    <template v-slot:append>
+                      <v-chip size="x-small" variant="tonal">
+                        {{ formatTimeAgo(notification.timestamp) }}
+                      </v-chip>
+                    </template>
+                  </v-list-item>
+                  <v-list-item v-if="notifications.length === 0">
+                    <v-list-item-title class="text-grey text-center">
+                      No notifications
+                    </v-list-item-title>
+                  </v-list-item>
+                </v-list>
+                <v-divider></v-divider>
+                <v-card-actions>
+                  <v-btn 
+                    block 
+                    variant="text" 
+                    @click="navigateTo('/notifications')"
+                    :disabled="notifications.length === 0"
+                  >
+                    View All Notifications
+                  </v-btn>
+                </v-card-actions>
+              </v-card>
+            </v-menu>
             
             <!-- User Menu -->
             <v-menu offset-y min-width="280">
@@ -307,10 +489,10 @@ const navigateTo = (path) => {
                       @click="navigateTo('/settings')"
                     ></v-list-item>
                     <v-list-item 
-                      prepend-icon="mdi-help-circle" 
-                      title="Help & Support" 
-                      subtitle="Get assistance"
-                      @click="navigateTo('/help')"
+                      prepend-icon="mdi-palette" 
+                      :title="darkMode ? 'Light Mode' : 'Dark Mode'" 
+                      subtitle="Toggle theme"
+                      @click="toggleDarkMode"
                     ></v-list-item>
                     <v-divider class="my-2"></v-divider>
                     <v-list-item 
@@ -404,6 +586,16 @@ const navigateTo = (path) => {
               :class="route.path === item.route ? 'text-white' : 'text-white'"
             >
               {{ item.title }}
+              <v-chip 
+                v-if="!rail && item.shortcut" 
+                size="x-small" 
+                variant="tonal" 
+                color="white"
+                class="ml-2"
+                label
+              >
+                {{ item.shortcut }}
+              </v-chip>
             </v-list-item-title>
             
             <v-list-item-subtitle 
@@ -419,7 +611,7 @@ const navigateTo = (path) => {
           </v-list-item>
         </v-list>
 
-        <!-- Bottom Section - Help Only -->
+        <!-- Bottom Section -->
         <template v-slot:append v-if="!rail">
           <div class="pa-4">
             <!-- Help Card -->
@@ -435,6 +627,14 @@ const navigateTo = (path) => {
                 </v-btn>
               </v-card-text>
             </v-card>
+            
+            <!-- Shortcut Info -->
+            <div class="text-center mt-4">
+              <v-chip size="small" variant="outlined" color="white" class="mb-1">
+                <v-icon size="small" class="mr-1">mdi-keyboard</v-icon>
+                Ctrl+K to search
+              </v-chip>
+            </div>
           </div>
         </template>
       </v-navigation-drawer>
@@ -535,6 +735,12 @@ const navigateTo = (path) => {
 .user-menu-card {
   border-radius: 16px !important;
   overflow: hidden;
+}
+
+.notifications-card {
+  border-radius: 16px !important;
+  max-height: 500px;
+  overflow-y: auto;
 }
 
 /* Navigation Drawer Styles */
@@ -662,6 +868,10 @@ const navigateTo = (path) => {
     width: 40px;
     height: 40px;
   }
+  
+  .brand-text {
+    display: none;
+  }
 }
 
 /* Scrollbar Styling */
@@ -681,4 +891,45 @@ const navigateTo = (path) => {
 :deep(.v-navigation-drawer__content)::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.3);
 }
+
+/* Dark mode support */
+[data-theme="dark"] {
+  .app-bar {
+    background: rgba(18, 18, 18, 0.95) !important;
+    border-bottom-color: rgba(255, 255, 255, 0.08) !important;
+  }
+  
+  .main-content {
+    background: linear-gradient(135deg, #121212 0%, #1e1e1e 100%);
+  }
+  
+  .user-btn {
+    background: rgba(255, 255, 255, 0.05) !important;
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+  
+  .search-field :deep(.v-field) {
+    background: rgba(255, 255, 255, 0.05);
+  }
+}
 </style>
+
+<!-- Add helper function for time formatting -->
+<script>
+function formatTimeAgo(dateString) {
+  if (!dateString) return 'Recently'
+  const date = new Date(dateString)
+  const now = new Date()
+  const diffMs = now - date
+  const diffMins = Math.floor(diffMs / 60000)
+  const diffHours = Math.floor(diffMs / 3600000)
+  const diffDays = Math.floor(diffMs / 86400000)
+  
+  if (diffMins < 1) return 'Just now'
+  if (diffMins < 60) return `${diffMins}m ago`
+  if (diffHours < 24) return `${diffHours}h ago`
+  if (diffDays < 7) return `${diffDays}d ago`
+  
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+</script>

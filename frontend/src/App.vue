@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import api from './services/api'  // Changed from named import
+import api from './services/api'  // ✅ CORRECT: Default import
 
 const router = useRouter()
 const route = useRoute()
@@ -18,11 +18,27 @@ const showLayout = computed(() => {
 })
 
 onMounted(() => {
+  loadUserData()
+})
+
+// Load user data from storage and API
+const loadUserData = async () => {
   const userStr = localStorage.getItem('user')
   if (userStr) {
     user.value = JSON.parse(userStr)
   }
-})
+  
+  // If authenticated but no user data, fetch from API
+  if (isAuthenticated.value && (!user.value || !user.value.username)) {
+    try {
+      const response = await api.users.getProfile()
+      user.value = response.data
+      localStorage.setItem('user', JSON.stringify(response.data))
+    } catch (error) {
+      console.error('Error loading user profile:', error)
+    }
+  }
+}
 
 const menuItems = [
   { 
@@ -77,15 +93,15 @@ const menuItems = [
 
 const handleLogout = async () => {
   try {
-    // Call the API service correctly
-    if (api.auth && typeof api.auth.logout === 'function') {
-      await api.auth.logout()
-    }
+    // ✅ CORRECT: Using the api object structure
+    await api.auth.logout()
   } catch (error) {
     console.error('Logout error:', error)
+    // Still logout locally even if API call fails
   } finally {
     localStorage.removeItem('token')
     localStorage.removeItem('user')
+    user.value = null
     router.push('/login')
   }
 }
@@ -93,16 +109,39 @@ const handleLogout = async () => {
 // Enhanced user display
 const userDisplay = computed(() => {
   if (!user.value) return 'User'
-  return user.value.first_name && user.value.last_name 
-    ? `${user.value.first_name} ${user.value.last_name}`
-    : user.value.username || 'User'
+  
+  // Check for enhanced user profile structure
+  if (user.value.user && user.value.user.first_name && user.value.user.last_name) {
+    return `${user.value.user.first_name} ${user.value.user.last_name}`
+  }
+  
+  // Check for basic user structure
+  if (user.value.first_name && user.value.last_name) {
+    return `${user.value.first_name} ${user.value.last_name}`
+  }
+  
+  return user.value.username || 'User'
 })
 
 const getUserInitials = () => {
   if (!user.value) return 'U'
-  if (user.value.first_name && user.value.last_name) {
-    return `${user.value.first_name.charAt(0)}${user.value.last_name.charAt(0)}`.toUpperCase()
+  
+  let firstName = ''
+  let lastName = ''
+  
+  // Handle nested user structure from profile API
+  if (user.value.user) {
+    firstName = user.value.user.first_name || ''
+    lastName = user.value.user.last_name || ''
+  } else {
+    firstName = user.value.first_name || ''
+    lastName = user.value.last_name || ''
   }
+  
+  if (firstName && lastName) {
+    return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase()
+  }
+  
   return (user.value.username || 'U').charAt(0).toUpperCase()
 }
 
@@ -112,10 +151,15 @@ const getItemGradient = (item) => {
 
 // Quick add functions
 const quickAdd = {
-  contact: () => router.push('/contacts?action=create'),
-  company: () => router.push('/companies?action=create'),
-  deal: () => router.push('/deals?action=create'),
-  task: () => router.push('/tasks?action=create'),
+  contact: () => router.push('/contacts/create'),
+  company: () => router.push('/companies/create'),
+  deal: () => router.push('/deals/create'),
+  task: () => router.push('/tasks/create'),
+}
+
+// Navigation functions
+const navigateTo = (path) => {
+  router.push(path)
 }
 </script>
 
@@ -165,6 +209,7 @@ const quickAdd = {
               flat
               class="search-field"
               bg-color="grey-lighten-4"
+              @keyup.enter="navigateTo('/search?q=' + $event.target.value)"
             >
               <template v-slot:append-inner>
                 <v-chip size="x-small" class="search-shortcut">⌘K</v-chip>
@@ -215,7 +260,7 @@ const quickAdd = {
             </v-menu>
             
             <!-- Notifications -->
-            <v-btn icon class="action-btn" variant="text">
+            <v-btn icon class="action-btn" variant="text" @click="navigateTo('/notifications')">
               <v-badge color="error" content="3" dot offset-x="12" offset-y="12">
                 <v-icon>mdi-bell</v-icon>
               </v-badge>
@@ -230,7 +275,7 @@ const quickAdd = {
                   </v-avatar>
                   <div class="ml-3 text-left d-none d-lg-block">
                     <div class="text-body-2 font-weight-bold">{{ userDisplay }}</div>
-                    <div class="text-caption text-grey">{{ user?.email || 'Premium Account' }}</div>
+                    <div class="text-caption text-grey">{{ user?.email || user?.user?.email || 'Premium Account' }}</div>
                   </div>
                   <v-icon class="ml-2">mdi-chevron-down</v-icon>
                 </v-btn>
@@ -243,7 +288,7 @@ const quickAdd = {
                     </v-avatar>
                     <div class="ml-3">
                       <div class="text-h6 font-weight-bold">{{ userDisplay }}</div>
-                      <div class="text-caption text-grey">{{ user?.email || '' }}</div>
+                      <div class="text-caption text-grey">{{ user?.email || user?.user?.email || '' }}</div>
                       <v-chip size="x-small" color="success" class="mt-1">Premium</v-chip>
                     </div>
                   </div>
@@ -253,18 +298,19 @@ const quickAdd = {
                       prepend-icon="mdi-account-circle" 
                       title="My Profile" 
                       subtitle="View your details"
-                      @click="router.push('/profile')"
+                      @click="navigateTo('/profile')"
                     ></v-list-item>
                     <v-list-item 
                       prepend-icon="mdi-cog" 
                       title="Settings" 
                       subtitle="Preferences"
-                      @click="router.push('/settings')"
+                      @click="navigateTo('/settings')"
                     ></v-list-item>
                     <v-list-item 
                       prepend-icon="mdi-help-circle" 
                       title="Help & Support" 
                       subtitle="Get assistance"
+                      @click="navigateTo('/help')"
                     ></v-list-item>
                     <v-divider class="my-2"></v-divider>
                     <v-list-item 
@@ -384,7 +430,7 @@ const quickAdd = {
                 </v-avatar>
                 <div class="text-h6 font-weight-bold text-white mb-1">Need Help?</div>
                 <div class="text-caption text-white opacity-80 mb-3">Get support from our team</div>
-                <v-btn size="small" variant="flat" color="white" block rounded="lg">
+                <v-btn size="small" variant="flat" color="white" block rounded="lg" @click="navigateTo('/help')">
                   <span class="text-primary font-weight-bold">Contact Support</span>
                 </v-btn>
               </v-card-text>
@@ -401,9 +447,8 @@ const quickAdd = {
   </v-app>
 </template>
 
-<!-- Keep all your existing styles - they're great! -->
 <style scoped>
-/* Your existing styles remain unchanged */
+/* App Bar Styles */
 .app-bar {
   background: rgba(255, 255, 255, 0.95) !important;
   backdrop-filter: blur(20px);
@@ -414,5 +459,226 @@ const quickAdd = {
   box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1) !important;
 }
 
-/* ... rest of your styles ... */
+.brand-section {
+  position: relative;
+}
+
+.logo-wrapper {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #1565C0 0%, #0D47A1 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(21, 101, 192, 0.4);
+}
+
+.logo-icon {
+  color: white;
+}
+
+.brand-text {
+  background: linear-gradient(135deg, #1565C0 0%, #0D47A1 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.search-wrapper {
+  max-width: 500px;
+  width: 100%;
+}
+
+.search-field {
+  border-radius: 16px !important;
+  overflow: hidden;
+}
+
+.search-field :deep(.v-field) {
+  border-radius: 16px;
+  box-shadow: none !important;
+}
+
+.search-shortcut {
+  background: rgba(0, 0, 0, 0.05);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 0 6px;
+  height: 20px;
+}
+
+.action-btn {
+  transition: all 0.3s ease;
+}
+
+.action-btn:hover {
+  transform: translateY(-2px);
+}
+
+.user-btn {
+  background: rgba(0, 0, 0, 0.02) !important;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  transition: all 0.3s ease;
+}
+
+.user-btn:hover {
+  background: rgba(0, 0, 0, 0.04) !important;
+  transform: translateY(-1px);
+}
+
+.avatar-gradient {
+  background: linear-gradient(135deg, #1565C0 0%, #0D47A1 100%) !important;
+  box-shadow: 0 4px 12px rgba(21, 101, 192, 0.3);
+}
+
+.user-menu-card {
+  border-radius: 16px !important;
+  overflow: hidden;
+}
+
+/* Navigation Drawer Styles */
+.navigation-drawer {
+  background: linear-gradient(180deg, #1a237e 0%, #0d47a1 100%) !important;
+  border-right: none !important;
+  position: relative;
+  overflow: hidden;
+}
+
+.drawer-gradient {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: 
+    radial-gradient(circle at 20% 20%, rgba(21, 101, 192, 0.3) 0%, transparent 50%),
+    radial-gradient(circle at 80% 80%, rgba(13, 71, 161, 0.3) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+.drawer-header {
+  position: relative;
+  z-index: 1;
+}
+
+.nav-logo-wrapper {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.collapse-btn {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.nav-list {
+  position: relative;
+  z-index: 1;
+}
+
+.nav-item {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.nav-item:hover {
+  transform: translateX(4px);
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.nav-item.v-list-item--active {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.nav-icon-wrapper {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+}
+
+/* Help Card */
+.help-card {
+  transition: all 0.3s ease;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  backdrop-filter: blur(10px);
+}
+
+.help-card:hover {
+  transform: translateY(-2px);
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.3) !important;
+}
+
+/* Main Content */
+.main-content {
+  background: linear-gradient(135deg, #f5f7fa 0%, #e8eef5 100%);
+  min-height: 100vh;
+}
+
+/* Rail Mode Adjustments */
+:deep(.v-navigation-drawer--rail) {
+  .nav-item {
+    justify-content: center;
+  }
+  
+  .nav-icon-wrapper {
+    margin: 0;
+  }
+}
+
+/* Responsive */
+@media (max-width: 960px) {
+  .search-wrapper {
+    max-width: 300px;
+  }
+}
+
+@media (max-width: 600px) {
+  .app-bar {
+    height: 64px !important;
+  }
+  
+  .logo-wrapper {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+/* Scrollbar Styling */
+:deep(.v-navigation-drawer__content)::-webkit-scrollbar {
+  width: 6px;
+}
+
+:deep(.v-navigation-drawer__content)::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:deep(.v-navigation-drawer__content)::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+:deep(.v-navigation-drawer__content)::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
 </style>

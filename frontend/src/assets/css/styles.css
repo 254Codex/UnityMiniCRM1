@@ -1,0 +1,28 @@
+/* Global Styles for Mini CRM */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Roboto', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.navy-gradient {
+  background: linear-gradient(135deg, #001f3f 0%, #0074D9 100%);
+}
+
+.text-navy {
+  color: #001f3f;
+}
+
+code {
+  background-color: rgba(0, 0, 0, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+}
